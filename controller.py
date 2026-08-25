@@ -100,7 +100,7 @@ class DoorController:
             self.close_triggered = False
 
     def start_opening(self, now):
-        """Transitions to OPENING state."""
+        """Transitions to OPENING state (Open is always safe and permitted)."""
         print("[Argus] Starting OPEN (8 seconds)...")
         self.state = DoorState.OPENING
         self.state_start_time = now
@@ -109,13 +109,13 @@ class DoorController:
     def start_closing(self, now):
         """Transitions to CLOSING state if safety sensor is clear."""
         if self._is_active(self.sensor):
-            print("[Argus] Cannot CLOSE: Safety sensor is currently obstructed!")
-            return
+            return False
 
         print("[Argus] Starting CLOSE (8 seconds or constant pressure)...")
         self.state = DoorState.CLOSING
         self.state_start_time = now
         self._set_outputs(0, 1)
+        return True
 
     def trigger_safety_reversal(self, now):
         """Emergency stop closing and reverse open for 200ms."""
@@ -140,19 +140,22 @@ class DoorController:
         # -------------------------------------------------------------
         # 1. Check Button Triggers for 500ms continuous press
         # -------------------------------------------------------------
-        # Open button held for >= 500ms
+        # Open button held for >= 500ms (Always responsive)
         if self.open_press_start is not None and not self.open_triggered:
             if self._time_diff(now, self.open_press_start) >= config.BUTTON_TRIGGER_MS:
                 self.open_triggered = True
-                if self.state in (DoorState.IDLE, DoorState.CLOSING):
+                if self.state in (DoorState.IDLE, DoorState.CLOSING, DoorState.REVERSING):
                     self.start_opening(now)
 
         # Close button held for >= 500ms
         if self.close_press_start is not None and not self.close_triggered:
             if self._time_diff(now, self.close_press_start) >= config.BUTTON_TRIGGER_MS:
-                self.close_triggered = True
                 if self.state in (DoorState.IDLE, DoorState.OPENING):
-                    self.start_closing(now)
+                    if not self._is_active(self.sensor):
+                        self.close_triggered = True
+                        self.start_closing(now)
+                    # Note: If sensor is active (e.g. 1s pulse), we don't set close_triggered yet.
+                    # As soon as the sensor pulse ends, closing will start immediately!
 
         # -------------------------------------------------------------
         # 2. State Machine Progress and Safety Handling

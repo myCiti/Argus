@@ -160,5 +160,58 @@ class TestDoorController(unittest.TestCase):
         self.assertEqual(self.door.state, DoorState.IDLE)
         self.assertEqual(self.out_close.value(), 0)
 
+    def test_one_second_sensor_pulse_during_closing(self):
+        """A 1-second sensor pulse reverses for 200ms without freezing subsequent Open commands."""
+        # 1. Start closing
+        self.btn_close.value(0)
+        self.door.advance_time(500)
+        self.btn_close.value(1)
+        self.assertEqual(self.door.state, DoorState.CLOSING)
+
+        # 2. Sensor emits 1000ms pulse (at t = 1000ms into closing)
+        self.door.advance_time(1000)
+        self.sensor.value(0)  # Pulse starts
+        self.door.advance_time(10)
+        self.assertEqual(self.door.state, DoorState.REVERSING)
+        self.assertEqual(self.out_open.value(), 1)
+
+        # 3. 200ms reverse completes -> enters IDLE, while sensor is STILL in its 1000ms pulse (790ms remaining)
+        self.door.advance_time(200)
+        self.assertEqual(self.door.state, DoorState.IDLE)
+        self.assertEqual(self.out_open.value(), 0)
+
+        # 4. User presses OPEN while sensor pulse is STILL active (500ms press)
+        self.btn_open.value(0)
+        self.door.advance_time(500)
+        self.btn_open.value(1)
+
+        # Door MUST open immediately without freezing or waiting for sensor to clear
+        self.assertEqual(self.door.state, DoorState.OPENING)
+        self.assertEqual(self.out_open.value(), 1)
+
+        # Clear sensor pulse
+        self.sensor.value(1)
+
+    def test_holding_close_through_transient_sensor_pulse(self):
+        """If user holds Close while sensor is active for 1s, closing starts seamlessly once sensor clears."""
+        # Sensor is currently emitting 1s pulse (0V)
+        self.sensor.value(0)
+
+        # User starts holding Close button
+        self.btn_close.value(0)
+        self.door.advance_time(600)
+
+        # Door must not close yet
+        self.assertEqual(self.door.state, DoorState.IDLE)
+        self.assertEqual(self.out_close.value(), 0)
+
+        # Sensor 1s pulse ends (sensor goes back to 1 / clear)
+        self.sensor.value(1)
+        self.door.advance_time(20)
+
+        # Door MUST immediately start CLOSING without requiring user to release and re-press Close!
+        self.assertEqual(self.door.state, DoorState.CLOSING)
+        self.assertEqual(self.out_close.value(), 1)
+
 if __name__ == "__main__":
     unittest.main()
