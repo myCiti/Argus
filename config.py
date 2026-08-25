@@ -21,5 +21,4 @@ PIN_LED = 25
 BUTTON_TRIGGER_MS = 500       # Time button must be held to trigger action (500 ms)
 DOOR_CYCLE_MS = 8000          # Standard travel time for opening/closing (8 seconds)
 SAFETY_REVERSE_MS = 200       # Duration of reverse open pulse when sensor is tripped (200 ms)
-SAFETY_DEADTIME_MS = 50       # Deadtime pause before changing motor directions
 POLL_INTERVAL_MS = 10         # Main loop polling interval (10 ms)
