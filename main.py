@@ -2,10 +2,8 @@
 # Main entry point for Project Argus on Raspberry Pi Pico (RP2040)
 
 import machine
-try:
-    import time
-except ImportError:
-    import utime as time
+import time
+
 
 import config
 from controller import DoorController
@@ -42,7 +40,7 @@ def main():
     sensor, btn_open, btn_close, out_open, out_close, led = init_hardware()
     controller = DoorController(sensor, btn_open, btn_close, out_open, out_close)
 
-    last_heartbeat = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
+    last_heartbeat = time.ticks_ms()
     led_state = 0
 
     try:
@@ -50,19 +48,17 @@ def main():
             # Update state machine
             controller.update()
 
-            # Heartbeat LED toggle every 1000ms
-            now = time.ticks_ms() if hasattr(time, "ticks_ms") else int(time.time() * 1000)
-            diff = time.ticks_diff(now, last_heartbeat) if hasattr(time, "ticks_diff") else (now - last_heartbeat)
-            if led is not None and diff >= 1000:
+            # Heartbeat LED toggle every config.HEARTBEAT_MS
+            now = time.ticks_ms()
+            diff = time.ticks_diff(now, last_heartbeat)
+            if led is not None and diff >= config.HEARTBEAT_MS:
                 led_state = 1 - led_state
                 led.value(led_state)
                 last_heartbeat = now
 
             # Non-blocking poll interval
-            if hasattr(time, "sleep_ms"):
-                time.sleep_ms(config.POLL_INTERVAL_MS)
-            else:
-                time.sleep(config.POLL_INTERVAL_MS / 1000.0)
+            time.sleep_ms(config.POLL_INTERVAL_MS)
+
 
     except KeyboardInterrupt:
         print("\nStopping controller...")

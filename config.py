@@ -22,3 +22,5 @@ BUTTON_TRIGGER_MS = 500       # Time button must be held to trigger action (500 
 DOOR_CYCLE_MS = 8000          # Standard travel time for opening/closing (8 seconds)
 SAFETY_REVERSE_MS = 200       # Duration of reverse open pulse when sensor is tripped (200 ms)
 POLL_INTERVAL_MS = 10         # Main loop polling interval (10 ms)
+SENSOR_IGNORE_MS = 1000       # Ignore sensor for this long after it triggers
+HEARTBEAT_MS = 500           # Heartbeat LED toggle interval (1 second)

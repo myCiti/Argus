@@ -1,10 +1,7 @@
 # controller.py
 # State machine and door logic implementation for Project Argus
 
-try:
-    import time
-except ImportError:
-    import utime as time
+import time
 
 import config
 
@@ -37,6 +34,9 @@ class DoorController:
         self.state = DoorState.IDLE
         self.state_start_time = 0
 
+        # Sensor blind window: sensor ignored until this timestamp (ticks_ms)
+        self.sensor_ignore_until = 0
+
         # Button tracking
         self.open_press_start = None
         self.open_triggered = False
@@ -45,15 +45,11 @@ class DoorController:
 
     def _get_time_ms(self):
         """Cross-platform/MicroPython ticks helper."""
-        if hasattr(time, "ticks_ms"):
-            return time.ticks_ms()
-        return int(time.time() * 1000)
+        return time.ticks_ms()
 
     def _time_diff(self, t_now, t_start):
         """Calculates elapsed milliseconds safely handling wrap-around."""
-        if hasattr(time, "ticks_diff"):
-            return time.ticks_diff(t_now, t_start)
-        return t_now - t_start
+        return time.ticks_diff(t_now, t_start)
 
     def _set_outputs(self, open_val, close_val):
         """
@@ -61,21 +57,18 @@ class DoorController:
         simultaneously active.
         """
         if open_val and close_val:
-            # Dangerous condition: force both OFF
+            # Interlock violation: both outputs are the same, turn them off
             self.out_open.value(0)
             self.out_close.value(0)
-            return
 
-        # Turn OFF active channel before activating the other (break-before-make)
-        if open_val:
-            self.out_close.value(0)
-            self.out_open.value(1)
-        elif close_val:
-            self.out_open.value(0)
-            self.out_close.value(1)
-        else:
-            self.out_open.value(0)
-            self.out_close.value(0)
+        self.out_open.value(open_val)
+        self.out_close.value(close_val)
+    
+    def _sensor_effective(self, now):
+        """True if sensor is active AND not within the post-trigger blind window."""
+        if self._time_diff(now, self.sensor_ignore_until) < 0:
+            return False  # inside the ignore window
+        return self._is_active(self.sensor)
 
     def _is_active(self, pin):
         """Returns True if the pin is at its active logic level."""
@@ -118,8 +111,10 @@ class DoorController:
         return True
 
     def trigger_safety_reversal(self, now):
-        """Emergency stop closing and reverse open for 200ms."""
-        print("[Argus] SAFETY TRIGGERED! Obstruction detected while closing. Reversing for 200ms...")
+        """Emergency reverse; blind the sensor so the latched pulse
+        doesn't freeze operation or cause an immediate re-trigger."""
+        print("[Argus] SAFETY TRIGGERED! Reversing...")
+        self.sensor_ignore_until = now + config.SENSOR_IGNORE_MS
         self.state = DoorState.REVERSING
         self.state_start_time = now
         self._set_outputs(1, 0)
@@ -147,16 +142,16 @@ class DoorController:
                 if self.state in (DoorState.IDLE, DoorState.CLOSING, DoorState.REVERSING):
                     self.start_opening(now)
 
-        # Close button held for >= 500ms
+        # Close button held >= 500ms
+        # Allowed from IDLE and OPENING, but gated by the effective sensor.
         if self.close_press_start is not None and not self.close_triggered:
             if self._time_diff(now, self.close_press_start) >= config.BUTTON_TRIGGER_MS:
                 if self.state in (DoorState.IDLE, DoorState.OPENING):
-                    if not self._is_active(self.sensor):
+                    if not self._sensor_effective(now):
                         self.close_triggered = True
                         self.start_closing(now)
-                    # Note: If sensor is active (e.g. 1s pulse), we don't set close_triggered yet.
-                    # As soon as the sensor pulse ends, closing will start immediately!
-
+                    # If sensor is effectively active, don't consume the press;
+                    # closing starts as soon as the sensor clears while held.
         # -------------------------------------------------------------
         # 2. State Machine Progress and Safety Handling
         # -------------------------------------------------------------
@@ -184,11 +179,26 @@ class DoorController:
                 pass
 
         elif self.state == DoorState.REVERSING:
-            elapsed = self._time_diff(now, self.state_start_time)
-            if elapsed >= config.SAFETY_REVERSE_MS:
+            # Manual override: user takes control immediately during reversal.
+            # Open always allowed; Close re-checked against the (blinded) sensor.
+            if self.open_triggered:
+                print("[Argus] Manual override during reversal: opening.")
+                self.start_opening(now)
+                return
+
+            if self.close_triggered:
+                if not self._sensor_effective(now):
+                    print("[Argus] Close requested during reversal.")
+                    self.start_closing(now)
+                else:
+                    print("[Argus] Close ignored: sensor obstructed.")
+                    self.close_triggered = True  # consume so it doesn't fire later
+                return
+
+            if self._time_diff(now, self.state_start_time) >= config.SAFETY_REVERSE_MS:
                 print("[Argus] Safety reversal complete.")
                 self.stop_to_idle()
-
+                
         elif self.state == DoorState.IDLE:
             # Everything stopped, waiting for user trigger
             pass
