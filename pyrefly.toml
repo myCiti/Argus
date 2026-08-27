@@ -1,0 +1,5 @@
+# Force Pyrefly to look inside your MicroPico stub folder
+search-path = [
+    ".",
+    "/home/chavtha/.micropico-stubs/included"
+]

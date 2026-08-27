@@ -18,9 +18,19 @@ PIN_OUT_CLOSE = 8
 PIN_LED = 25
 
 # --- Timing Parameters (in milliseconds) ---
-BUTTON_TRIGGER_MS = 500       # Time button must be held to trigger action (500 ms)
+BUTTON_TRIGGER_MS = 200       # Time button must be held to trigger action (500 ms)
 DOOR_CYCLE_MS = 8000          # Standard travel time for opening/closing (8 seconds)
 SAFETY_REVERSE_MS = 200       # Duration of reverse open pulse when sensor is tripped (200 ms)
 POLL_INTERVAL_MS = 10         # Main loop polling interval (10 ms)
-SENSOR_IGNORE_MS = 1000       # Ignore sensor for this long after it triggers
+SENSOR_IGNORE_MS = 8000       # Ignore sensor for this long after it triggers
 HEARTBEAT_MS = 500           # Heartbeat LED toggle interval (1 second)
+
+# Onboard RGB LED (WS2812 / NeoPixel)
+PIN_LED_RGB = 16
+PIN_LED_EXT = 6 # External LED (PWM)
+
+# Fade parameters
+FADE_STEP = 3 # how fast brightness changes
+FADE_MIN = 0
+FADE_MAX = 255
+

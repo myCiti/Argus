@@ -1,9 +1,10 @@
 # controller.py
 # State machine and door logic implementation for Project Argus
 
+import machine
 import time
-
 import config
+import neopixel
 
 class DoorState:
     IDLE = "IDLE"
@@ -20,12 +21,28 @@ class DoorController:
     - Constant pressure closing support
     - Mutual exclusion hardware interlock
     """
-    def __init__(self, pin_sensor, pin_btn_open, pin_btn_close, pin_out_open, pin_out_close):
+    def __init__(self, pin_sensor, pin_btn_open, pin_btn_close, pin_out_open, pin_out_close,
+                 pin_led_rgb=None, pin_led_ext=None):
         self.sensor = pin_sensor
         self.btn_open = pin_btn_open
         self.btn_close = pin_btn_close
         self.out_open = pin_out_open
         self.out_close = pin_out_close
+        
+        # NeoPixel RGB
+        self.led_rgb = None
+        if pin_led_rgb is not None:
+            self.led_rgb = neopixel.NeoPixel(machine.Pin(pin_led_rgb), 1)
+
+        # PWM LED external
+        self.led_ext_pwm = None
+        if pin_led_ext is not None:
+            self.led_ext_pwm = machine.PWM(pin_led_ext)
+            self.led_ext_pwm.freq(1000)
+
+        # Fade parameters
+        self.fade_value = 0
+        self.fade_direction = 1
 
         # Ensure all outputs start LOW (inactive)
         self._set_outputs(0, 0)
@@ -91,7 +108,33 @@ class DoorController:
         else:
             self.close_press_start = None
             self.close_triggered = False
+    
+    # ---------------------------------------------------------
+    # Fade synchronized for RGB + PWM
+    # ---------------------------------------------------------
+    def _update_fade(self):
+        self.fade_value += self.fade_direction * config.FADE_STEP
 
+        if self.fade_value >= config.FADE_MAX:
+            self.fade_value = config.FADE_MAX
+            self.fade_direction = -1
+
+        elif self.fade_value <= config.FADE_MIN:
+            self.fade_value = config.FADE_MIN
+            self.fade_direction = 1
+
+        # RGB NeoPixel
+        if self.led_rgb:
+            self.led_rgb[0] = (0, 0, self.fade_value)
+            self.led_rgb.write()
+
+        # PWM LED external
+        if self.led_ext_pwm:
+            duty = int(self.fade_value * 257)  # 0–255 → 0–65535
+            self.led_ext_pwm.duty_u16(duty)
+
+    # ---------------------------------------------------------
+    
     def start_opening(self, now):
         """Transitions to OPENING state (Open is always safe and permitted)."""
         print("[Argus] Starting OPEN (8 seconds)...")
@@ -101,7 +144,7 @@ class DoorController:
 
     def start_closing(self, now):
         """Transitions to CLOSING state if safety sensor is clear."""
-        if self._is_active(self.sensor):
+        if self._sensor_effective(now):
             return False
 
         print("[Argus] Starting CLOSE (8 seconds or constant pressure)...")
@@ -131,6 +174,9 @@ class DoorController:
         """
         now = self._get_time_ms()
         self._read_inputs(now)
+        
+        # Fade update
+        self._update_fade()
 
         # -------------------------------------------------------------
         # 1. Check Button Triggers for 500ms continuous press
@@ -150,8 +196,6 @@ class DoorController:
                     if not self._sensor_effective(now):
                         self.close_triggered = True
                         self.start_closing(now)
-                    # If sensor is effectively active, don't consume the press;
-                    # closing starts as soon as the sensor clears while held.
         # -------------------------------------------------------------
         # 2. State Machine Progress and Safety Handling
         # -------------------------------------------------------------
@@ -163,7 +207,7 @@ class DoorController:
 
         elif self.state == DoorState.CLOSING:
             # Priority 1: Check Safety Sensor (Instant Reversal)
-            if self._is_active(self.sensor):
+            if self._sensor_effective(now):
                 self.trigger_safety_reversal(now)
                 return
 
@@ -176,7 +220,9 @@ class DoorController:
                 self.stop_to_idle()
             elif elapsed >= config.DOOR_CYCLE_MS and btn_close_active:
                 # Constant pressure: continue closing as long as held
-                pass
+                print("[Argus] Constant pressure detected. Continuing to close.")
+                self.sensor_ignore_until = now + 500
+
 
         elif self.state == DoorState.REVERSING:
             # Manual override: user takes control immediately during reversal.
@@ -186,15 +232,6 @@ class DoorController:
                 self.start_opening(now)
                 return
 
-            if self.close_triggered:
-                if not self._sensor_effective(now):
-                    print("[Argus] Close requested during reversal.")
-                    self.start_closing(now)
-                else:
-                    print("[Argus] Close ignored: sensor obstructed.")
-                    self.close_triggered = True  # consume so it doesn't fire later
-                return
-
             if self._time_diff(now, self.state_start_time) >= config.SAFETY_REVERSE_MS:
                 print("[Argus] Safety reversal complete.")
                 self.stop_to_idle()
@@ -202,3 +239,22 @@ class DoorController:
         elif self.state == DoorState.IDLE:
             # Everything stopped, waiting for user trigger
             pass
+
+if __name__ == "__main__":
+    
+    import time
+    sensor = machine.Pin(config.PIN_SENSOR, machine.Pin.IN, machine.Pin.PULL_UP)
+    # Inputs with internal pull-up (Active LOW: 0V = 0)
+    sensor = machine.Pin(config.PIN_SENSOR, machine.Pin.IN, machine.Pin.PULL_UP)
+    btn_open = machine.Pin(config.PIN_BTN_OPEN, machine.Pin.IN, machine.Pin.PULL_UP)
+    btn_close = machine.Pin(config.PIN_BTN_CLOSE, machine.Pin.IN, machine.Pin.PULL_UP)
+
+    # Outputs (Active HIGH: 3.3V = 1, initialized to 0 / LOW)
+    out_open = machine.Pin(config.PIN_OUT_OPEN, machine.Pin.OUT, value=0)
+    out_close = machine.Pin(config.PIN_OUT_CLOSE, machine.Pin.OUT, value=0)
+    
+    controller = DoorController(sensor, btn_open, btn_close, out_open, out_close)
+    
+    while True:
+        print(f'{time.ticks_ms()} Sensor: {controller._sensor_effective(time.ticks_ms())}')
+        time.sleep_ms(200)
