@@ -1,6 +1,7 @@
-# Project Argus - Door Controller for Raspberry Pi Pico
+# Project Argus - Door Controller for Raspberry Pi Pico - Current sensor
 
 MicroPython door controller firmware for Raspberry Pi Pico / RP2040.
+**Doors stops and reverse when current is high: door seems bloqued.
 
 ## Hardware Pinout
 
